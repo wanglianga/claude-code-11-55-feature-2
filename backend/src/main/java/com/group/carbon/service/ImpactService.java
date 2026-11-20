@@ -5,6 +5,7 @@ import com.group.carbon.common.Types.*;
 import com.group.carbon.model.*;
 import com.group.carbon.repo.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -54,6 +55,12 @@ public class ImpactService {
   }
 
   private record Key(Long plantId, Long productLineId, String scope) {}
+
+  /** 供责任事件/裁定在独立事务中触发影响评估，失败不阻断事件落库。 */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public ImpactAssessment assessInNewTransaction(String period, TriggerType type, String ref) {
+    return assess(period, type, ref);
+  }
 
   @Transactional
   public ImpactAssessment assess(String period, TriggerType type, String ref) {
@@ -138,6 +145,8 @@ public class ImpactService {
   private Map<Key, BigDecimal> aggregateResults(Long runId) {
     Map<Key, BigDecimal> map = new HashMap<>();
     for (EmissionResult r : resultRepo.findByRunIdOrderById(runId)) {
+      // 仅集团纳入口径参与重算对比；排除/待裁定片段不并入集团趋势
+      if (r.getClassification() != AllocationClass.INCLUDED) continue;
       Key key = new Key(r.getPlantId(), r.getProductLineId(), r.getScope());
       map.merge(key, r.getEmissionTco2e() == null ? BigDecimal.ZERO : r.getEmissionTco2e(), BigDecimal::add);
     }

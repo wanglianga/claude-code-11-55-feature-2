@@ -10,6 +10,7 @@
         <el-menu-item index="/factors"><el-icon><Collection /></el-icon>因子目录</el-menu-item>
         <el-menu-item index="/runs"><el-icon><VideoPlay /></el-icon>核算运行</el-menu-item>
         <el-menu-item index="/impacts"><el-icon><Warning /></el-icon>影响评估</el-menu-item>
+        <el-menu-item index="/ownership"><el-icon><Connection /></el-icon>责任归属</el-menu-item>
         <el-menu-item index="/reports"><el-icon><Document /></el-icon>披露报告</el-menu-item>
       </el-menu>
     </el-aside>
@@ -32,7 +33,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { DataAnalysis, Upload, Collection, VideoPlay, Warning, Document } from '@element-plus/icons-vue'
+import { DataAnalysis, Upload, Collection, VideoPlay, Warning, Document, Connection } from '@element-plus/icons-vue'
 import { store } from './store'
 
 const router = useRouter()

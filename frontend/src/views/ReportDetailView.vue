@@ -5,6 +5,7 @@
         <h3 class="page-title">{{ data.report.title }}</h3>
         <div class="actions">
           <el-button size="small" @click="freezeDlg.visible = true">冻结新版本</el-button>
+          <el-button size="small" type="info" @click="compareDlg.visible = true">生成比较版本</el-button>
           <el-button size="small" type="warning" :disabled="data.report.status !== 'PENDING_REVIEW'"
                      @click="approve">审批</el-button>
           <el-button size="small" type="success" :disabled="data.report.status !== 'APPROVED'"
@@ -45,6 +46,17 @@
         </el-table-column>
         <el-table-column label="勾稽" width="110">
           <template #default="{ row }"><StatusTag kind="reconcile" :value="row.reconcileStatus" /></template>
+        </el-table-column>
+        <el-table-column label="责任口径" width="120">
+          <template #default="{ row }">
+            <StatusTag v-if="row.comparisonBasis" kind="comparisonBasis" :value="row.comparisonBasis" />
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="待裁定" width="70">
+          <template #default="{ row }">
+            <span :class="{ 'diff-pos': row.pendingOwnershipCount > 0 }">{{ row.pendingOwnershipCount || 0 }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="待核项" width="70">
           <template #default="{ row }">
@@ -113,6 +125,35 @@
       </el-table>
     </div>
 
+    <div class="page-card" v-if="versionDetail && versionDetail.summary">
+      <h3 class="page-title">v{{ versionDetail.version.versionNo }} 责任归属口径（冻结时固化，后续事件不改变本版本）</h3>
+      <el-descriptions :column="4" border size="small" style="margin-bottom:10px">
+        <el-descriptions-item label="纳入合并 (tCO2e)">
+          <b>{{ fmtNum(versionDetail.summary.includedTco2e, 2) }}</b>
+        </el-descriptions-item>
+        <el-descriptions-item label="排除 (tCO2e)">
+          {{ fmtNum(versionDetail.summary.excludedTco2e, 2) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="待裁定 (tCO2e)">
+          <span :class="{ 'diff-pos': toNum(versionDetail.summary.pendingTco2e) > 0 }">
+            {{ fmtNum(versionDetail.summary.pendingTco2e, 2) }}
+          </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="推导截止点">
+          {{ fmtTime(versionDetail.summary.derivedAsOf) }}
+        </el-descriptions-item>
+      </el-descriptions>
+      <el-table v-if="versionDetail.notes && versionDetail.notes.length" :data="versionDetail.notes" size="small" border>
+        <el-table-column label="注释类型" width="130">
+          <template #default="{ row }"><StatusTag kind="noteType" :value="row.noteType" /></template>
+        </el-table-column>
+        <el-table-column label="区间" width="200">
+          <template #default="{ row }">{{ row.segmentStart || '-' }} ~ {{ row.segmentEnd || '' }}</template>
+        </el-table-column>
+        <el-table-column prop="content" label="可比性注释" min-width="320" show-overflow-tooltip />
+      </el-table>
+    </div>
+
     <div class="page-card" v-if="data.restatements.length">
       <h3 class="page-title">重述记录</h3>
       <el-table :data="data.restatements" size="small" border>
@@ -131,8 +172,7 @@
       </el-table>
     </div>
 
-    <el-dialog v-model="freezeDlg.visible" title="冻结新版本" width="480px" destroy-on-close>
-      <el-form label-width="90px">
+    <el-dialog v-model="freezeDlg.visible" title="冻结新版本" width="480px" destroy-on-close>      <el-form label-width="90px">
         <el-form-item label="核算运行">
           <el-select v-model="freezeDlg.runId" style="width:100%">
             <el-option v-for="r in freezeDlg.runs" :key="r.id"
@@ -145,6 +185,24 @@
       <template #footer>
         <el-button @click="freezeDlg.visible = false">取消</el-button>
         <el-button type="primary" @click="freeze">冻结</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="compareDlg.visible" title="生成冻结后比较版本" width="520px" destroy-on-close>
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+                title="冻结报告后补入的活动或责任裁定不会改写已冻结/发布版本；将基于候选运行生成新的比较版本，原范围保留。" />
+      <el-form label-width="90px">
+        <el-form-item label="候选运行">
+          <el-select v-model="compareDlg.runId" style="width:100%">
+            <el-option v-for="r in compareDlg.runs" :key="r.id"
+                       :label="`${r.runNo}（${r.period} · 候选）`" :value="r.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="原因"><el-input v-model="compareDlg.reason" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="compareDlg.visible = false">取消</el-button>
+        <el-button type="primary" @click="createComparison">生成比较版本</el-button>
       </template>
     </el-dialog>
   </div>
@@ -163,6 +221,9 @@ const data = ref(null)
 const versionDetail = ref(null)
 const selectedVersionId = ref(null)
 const freezeDlg = reactive({ visible: false, runId: null, note: '', runs: [] })
+const compareDlg = reactive({ visible: false, runId: null, reason: '', runs: [] })
+
+function toNum(v) { return v == null ? 0 : Number(v) }
 
 async function load() {
   const resp = await api.get(`/reports/${route.params.id}`)
@@ -213,12 +274,26 @@ async function freeze() {
   load()
 }
 
+async function createComparison() {
+  if (!compareDlg.runId) { ElMessage.warning('请选择候选运行'); return }
+  await api.post(`/reports/${route.params.id}/comparison-versions`, {
+    candidateRunId: compareDlg.runId, reason: compareDlg.reason || null
+  })
+  ElMessage.success('已生成比较版本，原冻结/发布范围保留')
+  compareDlg.visible = false
+  selectedVersionId.value = null
+  load()
+}
+
 onMounted(async () => {
   await store.loadMeta()
   await load()
   const resp = await api.get('/runs')
+  const period = data.value.report.period
   freezeDlg.runs = resp.data.filter(
-    r => r.period === data.value.report.period && r.status === 'COMPLETED')
+    r => r.period === period && r.status === 'COMPLETED' && r.purpose === 'OFFICIAL')
+  compareDlg.runs = resp.data.filter(
+    r => r.period === period && r.status === 'COMPLETED' && r.purpose === 'CANDIDATE')
 })
 </script>
 

@@ -2,6 +2,7 @@ package com.group.carbon.model;
 
 import com.group.carbon.common.Types.ReconcileStatus;
 import com.group.carbon.common.Types.VersionStatus;
+import com.group.carbon.common.Types.ComparisonBasis;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -46,6 +47,20 @@ public class ReportVersion {
   private Long restatementOfVersionId;
   @Column
   private String note;
+  /** 纳入合并报表口径排放（= totalTco2e 的责任口径镜像，便于版本对比直接读取） */
+  @Column(name = "included_tco2e")
+  private BigDecimal includedTco2e;
+  /** 排除片段排放（非集团运营控制，不并入集团趋势） */
+  @Column(name = "excluded_tco2e")
+  private BigDecimal excludedTco2e;
+  /** 待裁定片段排放（控制权与设备交接不一致，未决前不并入任一集团趋势） */
+  @Column(name = "pending_tco2e")
+  private BigDecimal pendingTco2e;
+  @Column(name = "pending_ownership_count", nullable = false)
+  private int pendingOwnershipCount = 0;
+  @Enumerated(EnumType.STRING)
+  @Column(name = "comparison_basis")
+  private ComparisonBasis comparisonBasis = ComparisonBasis.INITIAL;
 
   public Long getId() { return id; }
   public void setId(Long id) { this.id = id; }
@@ -81,4 +96,14 @@ public class ReportVersion {
   public void setRestatementOfVersionId(Long restatementOfVersionId) { this.restatementOfVersionId = restatementOfVersionId; }
   public String getNote() { return note; }
   public void setNote(String note) { this.note = note; }
+  public BigDecimal getIncludedTco2e() { return includedTco2e; }
+  public void setIncludedTco2e(BigDecimal includedTco2e) { this.includedTco2e = includedTco2e; }
+  public BigDecimal getExcludedTco2e() { return excludedTco2e; }
+  public void setExcludedTco2e(BigDecimal excludedTco2e) { this.excludedTco2e = excludedTco2e; }
+  public BigDecimal getPendingTco2e() { return pendingTco2e; }
+  public void setPendingTco2e(BigDecimal pendingTco2e) { this.pendingTco2e = pendingTco2e; }
+  public int getPendingOwnershipCount() { return pendingOwnershipCount; }
+  public void setPendingOwnershipCount(int pendingOwnershipCount) { this.pendingOwnershipCount = pendingOwnershipCount; }
+  public ComparisonBasis getComparisonBasis() { return comparisonBasis; }
+  public void setComparisonBasis(ComparisonBasis comparisonBasis) { this.comparisonBasis = comparisonBasis; }
 }

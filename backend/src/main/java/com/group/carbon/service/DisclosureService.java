@@ -29,12 +29,13 @@ public class DisclosureService {
   private final ProductLineRepo lineRepo;
   private final RestatementRepo restatementRepo;
   private final ImpactAssessmentRepo impactRepo;
+  private final OwnershipService ownershipService;
 
   public DisclosureService(ReportRepo reportRepo, ReportVersionRepo versionRepo,
                            ReportItemRepo itemRepo, ReconciliationRepo reconRepo,
                            EmissionResultRepo resultRepo, CalcRunRepo runRepo,
                            ProductLineRepo lineRepo, RestatementRepo restatementRepo,
-                           ImpactAssessmentRepo impactRepo) {
+                           ImpactAssessmentRepo impactRepo, OwnershipService ownershipService) {
     this.reportRepo = reportRepo;
     this.versionRepo = versionRepo;
     this.itemRepo = itemRepo;
@@ -44,6 +45,7 @@ public class DisclosureService {
     this.lineRepo = lineRepo;
     this.restatementRepo = restatementRepo;
     this.impactRepo = impactRepo;
+    this.ownershipService = ownershipService;
   }
 
   public List<Report> listReports() { return reportRepo.findAllByOrderByIdDesc(); }
@@ -59,6 +61,7 @@ public class DisclosureService {
       ReportVersion latest = versions.get(0);
       out.put("items", itemRepo.findByReportVersionIdOrderById(latest.getId()));
       out.put("reconciliations", reconRepo.findByReportVersionIdOrderById(latest.getId()));
+      ownershipSummaryInto(latest.getId(), out);
     }
     return out;
   }
@@ -70,7 +73,17 @@ public class DisclosureService {
     out.put("version", v);
     out.put("items", itemRepo.findByReportVersionIdOrderById(versionId));
     out.put("reconciliations", reconRepo.findByReportVersionIdOrderById(versionId));
+    ownershipSummaryInto(versionId, out);
     return out;
+  }
+
+  private void ownershipSummaryInto(Long versionId, Map<String, Object> out) {
+    try {
+      out.putAll(ownershipService.versionOwnership(versionId));
+    } catch (BizException e) {
+      out.put("summary", null);
+      out.put("notes", List.of());
+    }
   }
 
   private Report getReport(Long id) {
@@ -128,7 +141,12 @@ public class DisclosureService {
     version.setNote(note);
 
     // 1) 汇总运行结果为披露条目（工厂 × 产品线 × 范围 × 能源类型）
-    List<EmissionResult> results = resultRepo.findByRunIdOrderById(runId);
+    //    仅“纳入”集团运营控制的片段进入合并报表；排除/待裁定片段不进披露条目
+    List<EmissionResult> results = resultRepo.findByRunIdOrderById(runId).stream()
+        .filter(r -> r.getClassification() == AllocationClass.INCLUDED)
+        .toList();
+    long pendingOwnership = resultRepo.findByRunIdOrderById(runId).stream()
+        .filter(r -> r.getStatus() == ResultStatus.PENDING_OWNERSHIP).count();
     record AggKey(Long plantId, Long productLineId, String scope, String energyType) {}
     Map<AggKey, List<EmissionResult>> grouped = new LinkedHashMap<>();
     for (EmissionResult r : results) {
@@ -197,12 +215,23 @@ public class DisclosureService {
       saveRecon(version.getId(), null, "缺少适用批准因子的待核指标（" + pendingCount + " 项）",
           BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "PENDING_FACTOR");
     }
+    if (pendingOwnership > 0) {
+      saveRecon(version.getId(), null,
+          "控制权与设备交接不一致的待裁定责任片段（" + pendingOwnership + " 项，未并入集团趋势）",
+          BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "PENDING_OWNERSHIP");
+    }
 
     ReconcileStatus reconcile = unallocated.compareTo(BigDecimal.ZERO) != 0
         ? ReconcileStatus.MISMATCH
-        : (pendingCount > 0 ? ReconcileStatus.PENDING_FACTOR : ReconcileStatus.OK);
+        : (pendingCount > 0 ? ReconcileStatus.PENDING_FACTOR
+            : (pendingOwnership > 0 ? ReconcileStatus.PENDING_OWNERSHIP : ReconcileStatus.OK));
     version.setReconcileStatus(reconcile);
     version.setReconcileDiff(unallocated);
+    if (version.getComparisonBasis() == null) version.setComparisonBasis(ComparisonBasis.INITIAL);
+    versionRepo.save(version);
+
+    // 4) 固化责任归属汇总（纳入/排除/待裁定）与可比性注释；冻结后不再随事件变化
+    ownershipService.freezeOwnership(version, run);
     versionRepo.save(version);
 
     report.setStatus(reconcile == ReconcileStatus.OK ? ReportStatus.PENDING_REVIEW : ReportStatus.RECONCILE_FAILED);
@@ -288,7 +317,7 @@ public class DisclosureService {
         .findFirst().orElseThrow(() -> BizException.conflict("报告尚未冻结任何版本"));
   }
 
-  /** 待核/勾稽不平时禁止推进：差额不能为了按期提交而归零。 */
+  /** 待核/勾稽不平/责任待裁定时禁止推进：差额不能归零，未决片段不能并入趋势。 */
   private void requireReconciled(ReportVersion version) {
     if (version.getReconcileStatus() == ReconcileStatus.MISMATCH) {
       throw BizException.conflict("产品线合计与工厂明细不勾稽（差异 "
@@ -298,5 +327,43 @@ public class DisclosureService {
       throw BizException.conflict("存在 " + version.getPendingCount()
           + " 项缺少适用批准因子的待核指标，报告保持待核，不能推进审批/发布");
     }
+    if (version.getReconcileStatus() == ReconcileStatus.PENDING_OWNERSHIP
+        || version.getPendingOwnershipCount() > 0) {
+      throw BizException.conflict("存在 " + version.getPendingOwnershipCount()
+          + " 项控制权与设备交接不一致的待裁定责任片段，未决前不并入集团趋势，不能推进审批/发布");
+    }
+  }
+
+  /**
+   * 冻结报告后补入活动或裁定：基于候选运行生成新的“比较版本”，
+   * 原已冻结/发布版本范围保留不变；比较版本需重新走审批/发布才会替换口径。
+   */
+  @Transactional
+  public ReportVersion createComparisonVersion(Long reportId, Long candidateRunId,
+                                               String reason, String username) {
+    Report report = reportRepo.findByIdForUpdate(reportId)
+        .orElseThrow(() -> BizException.notFound("报告不存在: " + reportId));
+    CalcRun run = runRepo.findById(candidateRunId)
+        .orElseThrow(() -> BizException.notFound("候选运行不存在: " + candidateRunId));
+    if (run.getStatus() != RunStatus.COMPLETED) {
+      throw BizException.conflict("只能基于“已完成”的候选运行生成比较版本");
+    }
+    if (!run.getPeriod().equals(report.getPeriod())) {
+      throw BizException.badRequest("候选运行期间与报告期间不一致");
+    }
+    ReportVersion published = versionRepo
+        .findFirstByReportIdAndStatusOrderByVersionNoDesc(reportId, VersionStatus.PUBLISHED).orElse(null);
+    ReportVersion latest = latestVersion(reportId);
+
+    ReportVersion version = freeze(reportId, candidateRunId, username,
+        published != null ? published.getId() : latest.getId(),
+        "冻结后补入活动/裁定的比较版本：" + (reason == null ? "" : reason));
+    version.setComparisonBasis(ComparisonBasis.POST_FREEZE_COMPARISON);
+    versionRepo.save(version);
+    // 比较版本不自动发布：报告回到待核/待复核，保留原发布版本范围
+    report.setStatus(version.getReconcileStatus() == ReconcileStatus.OK
+        ? ReportStatus.PENDING_REVIEW : ReportStatus.RECONCILE_FAILED);
+    reportRepo.save(report);
+    return version;
   }
 }

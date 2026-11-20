@@ -2,6 +2,7 @@ package com.group.carbon.controller;
 
 import com.group.carbon.common.AuthContext;
 import com.group.carbon.common.Types.Role;
+import com.group.carbon.dto.Requests.CompareVersionReq;
 import com.group.carbon.dto.Requests.CreateReportReq;
 import com.group.carbon.dto.Requests.FreezeReq;
 import com.group.carbon.service.DisclosureService;
@@ -38,6 +39,14 @@ public class DisclosureController {
   public Object freeze(@PathVariable Long id, @Valid @RequestBody FreezeReq req) {
     AuthContext.requireRole(Role.ANALYST, Role.ADMIN);
     return disclosureService.freeze(id, req.runId(), AuthContext.require().username(), null, req.note());
+  }
+
+  /** 冻结报告后补入活动/裁定：生成新的比较版本，原冻结/发布范围保留不变。 */
+  @PostMapping("/{id}/comparison-versions")
+  public Object comparisonVersion(@PathVariable Long id, @Valid @RequestBody CompareVersionReq req) {
+    AuthContext.requireRole(Role.ANALYST, Role.ADMIN, Role.FINANCE);
+    return disclosureService.createComparisonVersion(id, req.candidateRunId(),
+        req.reason(), AuthContext.require().username());
   }
 
   @PostMapping("/{id}/approve")

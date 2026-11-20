@@ -24,9 +24,12 @@
         <div class="sub">来源/因子变化触发</div>
       </el-card>
       <el-card class="stat" shadow="never">
-        <div class="label">待核报告 / 待核指标</div>
-        <div class="value danger">{{ data.counts.reconcileFailedReports }} / {{ data.counts.pendingFactorResults }}</div>
-        <div class="sub">勾稽不平或缺少适用因子</div>
+        <div class="label">待核报告 / 缺因子 / 待裁定</div>
+        <div class="value danger">
+          {{ data.counts.reconcileFailedReports }} / {{ data.counts.pendingFactorResults }}
+          / <span class="warn">{{ data.counts.pendingOwnershipResults || 0 }}</span>
+        </div>
+        <div class="sub">勾稽不平、缺少因子或控制权待裁定</div>
       </el-card>
     </div>
 

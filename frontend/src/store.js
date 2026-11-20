@@ -61,7 +61,38 @@ export const STATUS_MAPS = {
     RUNNING: ['运行中', 'warning'], COMPLETED: ['已完成', 'success'], FAILED: ['失败', 'danger']
   },
   result: {
-    OK: ['正常', 'success'], PENDING_FACTOR: ['待核(缺因子)', 'warning']
+    OK: ['正常', 'success'], PENDING_FACTOR: ['待核(缺因子)', 'warning'],
+    PENDING_OWNERSHIP: ['待裁定(责任)', 'danger']
+  },
+  allocation: {
+    INCLUDED: ['纳入合并', 'success'], EXCLUDED: ['排除', 'info'], PENDING: ['待裁定', 'danger']
+  },
+  ownershipEvent: {
+    ACQUISITION: ['股权收购', 'primary'], DIVESTITURE: ['股权剥离', 'warning'],
+    HANDOVER: ['设备交接', 'primary'], METER_STOP: ['停止计量', 'warning'],
+    LEASE: ['租赁约定', 'info'], RULING: ['责任裁定', 'success'], CORRECTION: ['追溯更正', 'danger']
+  },
+  evidence: {
+    LEGAL: ['法人控制权', 'primary'], ASSET: ['资产归属', 'primary'],
+    LEASE: ['租赁约定', 'info'], HANDOVER: ['交接凭证', 'success'],
+    METERING: ['停计量通知', 'warning'], RULING: ['裁定', 'danger'], CORRECTION: ['更正', 'danger']
+  },
+  ruling: {
+    ACTIVE: ['生效', 'success'], SUPERSEDED: ['被取代', 'info']
+  },
+  rulingDecision: {
+    INCLUDE: ['纳入', 'success'], EXCLUDE: ['排除', 'info'], PENDING: ['维持待裁定', 'danger']
+  },
+  party: {
+    GROUP: ['集团内', 'primary'], EXTERNAL: ['集团外', 'info']
+  },
+  noteType: {
+    PENDING_GAP: ['待裁定缺口', 'danger'], ACQUISITION: ['年中收购', 'primary'],
+    DIVESTITURE: ['股权剥离', 'warning'], SHARED_EQUIPMENT: ['共享租赁', 'info'],
+    RULING: ['责任裁定', 'success'], EXCLUSION: ['排除说明', 'info']
+  },
+  comparisonBasis: {
+    INITIAL: ['初始冻结', 'primary'], POST_FREEZE_COMPARISON: ['冻结后比较版本', 'warning']
   },
   report: {
     DRAFT: ['草稿', 'info'], PENDING_REVIEW: ['待复核', 'warning'],
@@ -73,11 +104,13 @@ export const STATUS_MAPS = {
     SUPERSEDED: ['被取代', 'info'], RESTATED: ['已重述', 'warning']
   },
   reconcile: {
-    OK: ['勾稽一致', 'success'], MISMATCH: ['勾稽差异', 'danger'], PENDING_FACTOR: ['含待核指标', 'warning']
+    OK: ['勾稽一致', 'success'], MISMATCH: ['勾稽差异', 'danger'],
+    PENDING_FACTOR: ['含待核指标', 'warning'], PENDING_OWNERSHIP: ['含待裁定片段', 'danger']
   },
   trigger: {
     SOURCE_SUPPLEMENT: ['来源补录', 'primary'], SOURCE_REVISION: ['来源修订', 'primary'],
-    SOURCE_MISSING: ['来源缺失', 'danger'], FACTOR_REVISION: ['因子修订', 'warning']
+    SOURCE_MISSING: ['来源缺失', 'danger'], FACTOR_REVISION: ['因子修订', 'warning'],
+    OWNERSHIP_RULING: ['责任裁定', 'success'], OWNERSHIP_CORRECTION: ['追溯更正', 'danger']
   },
   impact: {
     OPEN: ['待处理', 'warning'], ACKNOWLEDGED: ['已受理', 'info'], RESOLVED: ['已解决', 'success']

@@ -99,6 +99,11 @@
                 <el-input v-model="row.voucherNo" placeholder="如 V-1001" />
               </template>
             </el-table-column>
+            <el-table-column label="设备编号" width="140" v-if="dialog.category !== 'PROCUREMENT'">
+              <template #default="{ row }">
+                <el-input v-model="row.equipmentCode" placeholder="共享/租赁设备，可空" />
+              </template>
+            </el-table-column>
             <el-table-column width="60">
               <template #default="{ $index }">
                 <el-button link type="danger" size="small" @click="dialog.rows.splice($index, 1)">删</el-button>
@@ -145,6 +150,9 @@
           </el-table-column>
           <el-table-column prop="voucherNo" label="凭证" width="90">
             <template #default="{ row }">{{ row.voucherNo || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="equipmentCode" label="设备" width="100">
+            <template #default="{ row }">{{ row.equipmentCode || '工厂级' }}</template>
           </el-table-column>
           <el-table-column label="已核算" width="70">
             <template #default="{ row }">
@@ -210,7 +218,8 @@ function categoryLabel(c) {
 }
 
 function newRow() {
-  return { plantId: null, productLineId: null, energyType: null, quantity: 1, voucherNo: '' }
+  return { plantId: null, productLineId: null, energyType: null, quantity: 1,
+           voucherNo: '', equipmentCode: '' }
 }
 
 async function load() {
@@ -238,7 +247,8 @@ async function openRevise(row) {
   const resp = await api.get(`/batches/${row.id}`)
   const rows = resp.data.rows.map(r => ({
     plantId: r.plantId, productLineId: r.productLineId, energyType: r.energyType,
-    quantity: Number(r.quantity), voucherNo: r.voucherNo || ''
+    quantity: Number(r.quantity), voucherNo: r.voucherNo || '',
+    equipmentCode: r.equipmentCode || ''
   }))
   Object.assign(dialog, {
     visible: true, revising: true, saving: false,
@@ -255,7 +265,8 @@ async function submitDialog() {
       plantId: dialog.plantId, category: dialog.category, period: dialog.period,
       rows: dialog.rows.map(r => ({
         plantId: r.plantId, productLineId: r.productLineId, energyType: r.energyType,
-        quantity: r.quantity, voucherNo: r.voucherNo || null
+        quantity: r.quantity, voucherNo: r.voucherNo || null,
+        equipmentCode: r.equipmentCode || null
       }))
     }
     if (dialog.revising) {

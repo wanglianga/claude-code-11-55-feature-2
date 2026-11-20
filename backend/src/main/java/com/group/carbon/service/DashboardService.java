@@ -82,11 +82,16 @@ public class DashboardService {
     long pendingResults = latestOfficial == null ? 0
         : resultRepo.findByRunIdOrderById(latestOfficial.getId()).stream()
             .filter(r -> r.getStatus() == ResultStatus.PENDING_FACTOR).count();
+    long pendingOwnership = latestOfficial == null ? 0
+        : (latestOfficial.isHasPendingOwnership()
+            ? resultRepo.findByRunIdOrderById(latestOfficial.getId()).stream()
+                .filter(r -> r.getStatus() == ResultStatus.PENDING_OWNERSHIP).count() : 0);
 
     Map<String, Object> counts = new LinkedHashMap<>();
     counts.put("openImpacts", openImpacts);
     counts.put("reconcileFailedReports", reconcileFailed);
     counts.put("pendingFactorResults", pendingResults);
+    counts.put("pendingOwnershipResults", pendingOwnership);
     counts.put("totalReports", reportRepo.count());
     counts.put("totalRuns", runs.size());
     out.put("counts", counts);

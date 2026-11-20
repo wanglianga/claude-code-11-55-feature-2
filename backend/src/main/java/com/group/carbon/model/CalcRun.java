@@ -4,7 +4,6 @@ import com.group.carbon.common.Types.RunPurpose;
 import com.group.carbon.common.Types.RunStatus;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
-
 @Entity
 @Table(name = "calc_runs")
 public class CalcRun {
@@ -30,6 +29,12 @@ public class CalcRun {
   private LocalDateTime completedAt;
   @Column
   private String error;
+  /** 责任状态推导截止点（运行创建时刻；事件流按此复演，运行期间新增事件不影响本次运行） */
+  @Column(name = "ownership_cutoff")
+  private LocalDateTime ownershipCutoff;
+  /** 本次运行是否存在待裁定的责任片段 */
+  @Column(name = "has_pending_ownership", nullable = false)
+  private boolean hasPendingOwnership = false;
 
   public Long getId() { return id; }
   public void setId(Long id) { this.id = id; }
@@ -51,4 +56,8 @@ public class CalcRun {
   public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
   public String getError() { return error; }
   public void setError(String error) { this.error = error; }
+  public LocalDateTime getOwnershipCutoff() { return ownershipCutoff; }
+  public void setOwnershipCutoff(LocalDateTime ownershipCutoff) { this.ownershipCutoff = ownershipCutoff; }
+  public boolean isHasPendingOwnership() { return hasPendingOwnership; }
+  public void setHasPendingOwnership(boolean hasPendingOwnership) { this.hasPendingOwnership = hasPendingOwnership; }
 }

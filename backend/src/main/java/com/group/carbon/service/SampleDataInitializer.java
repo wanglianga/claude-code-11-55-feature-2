@@ -1,8 +1,11 @@
 package com.group.carbon.service;
 
+import com.group.carbon.common.Types.PartyType;
 import com.group.carbon.common.Types.Role;
 import com.group.carbon.dto.Requests.CreateBatchReq;
+import com.group.carbon.dto.Requests.CreateEventReq;
 import com.group.carbon.dto.Requests.CreateFactorReq;
+import com.group.carbon.dto.Requests.CreatePartyReq;
 import com.group.carbon.dto.Requests.CreateVersionReq;
 import com.group.carbon.dto.Requests.RowInput;
 import com.group.carbon.model.*;
@@ -22,7 +25,9 @@ import java.util.List;
  * 样例数据初始化（仅当库为空时执行）：
  * 工厂/产品线/用户、因子目录（含未批准版本以演示待核指标）、
  * 2025-05 已核验批次 → 正式运行 → 已发布报告；
- * 2025-06 批次（含未分摊行、缺因子行、集团采购批次）用于验收回放。
+ * 2025-06 批次（含未分摊行、缺因子行、集团采购批次）用于验收回放；
+ * 责任归属：存量工厂的历史法人控制权证据，以及 2025-07 武汉工厂
+ * “年中收购 + 共享租赁设备 + 停计量/交接不一致”场景（待裁定缺口）。
  */
 @Component
 public class SampleDataInitializer implements ApplicationRunner {
@@ -33,24 +38,30 @@ public class SampleDataInitializer implements ApplicationRunner {
   private final ProductLineRepo lineRepo;
   private final FactorRepo factorRepo;
   private final FactorVersionRepo versionRepo;
+  private final OwnershipPartyRepo partyRepo;
   private final BatchService batchService;
   private final RunService runService;
   private final FactorService factorService;
   private final DisclosureService disclosureService;
+  private final OwnershipService ownershipService;
 
   public SampleDataInitializer(UserRepo userRepo, PlantRepo plantRepo, ProductLineRepo lineRepo,
                                FactorRepo factorRepo, FactorVersionRepo versionRepo,
+                               OwnershipPartyRepo partyRepo,
                                BatchService batchService, RunService runService,
-                               FactorService factorService, DisclosureService disclosureService) {
+                               FactorService factorService, DisclosureService disclosureService,
+                               OwnershipService ownershipService) {
     this.userRepo = userRepo;
     this.plantRepo = plantRepo;
     this.lineRepo = lineRepo;
     this.factorRepo = factorRepo;
     this.versionRepo = versionRepo;
+    this.partyRepo = partyRepo;
     this.batchService = batchService;
     this.runService = runService;
     this.factorService = factorService;
     this.disclosureService = disclosureService;
+    this.ownershipService = ownershipService;
   }
 
   @Override
@@ -71,8 +82,44 @@ public class SampleDataInitializer implements ApplicationRunner {
     // ---------- 工厂与产品线 ----------
     Plant sz = plant("SZ", "苏州工厂", "CN-EAST");
     Plant cd = plant("CD", "成都工厂", "CN-WEST");
+    Plant wh = plant("WH", "武汉工厂", "CN-EAST");
     ProductLine l1 = line("L1", "精密结构件");
     ProductLine l2 = line("L2", "电池模组");
+
+    // ---------- 责任主体 ----------
+    OwnershipParty group = party("GP-GROUP", "集团本部（合并方）", PartyType.GROUP);
+    party("GP-WH-OLD", "武汉原股东（集团外）", PartyType.EXTERNAL);
+    party("GP-LESSOR", "华东设备租赁公司（出租方）", PartyType.EXTERNAL);
+
+    // ---------- 责任事件（不可变） ----------
+    // 存量工厂：报告期初之前已由集团取得法人控制权，历史活动全部纳入（不按当前股权反挂之外的额外处理）
+    ownershipService.registerEvent(new CreateEventReq(
+        "ACQUISITION", sz.getId(), null, "LEGAL", "LEGAL-SZ-2024-001",
+        "2024-01-01", null, group.getId(), null, null, null,
+        "苏州工厂历史股权交割证据"), "admin");
+    ownershipService.registerEvent(new CreateEventReq(
+        "ACQUISITION", cd.getId(), null, "LEGAL", "LEGAL-CD-2024-001",
+        "2024-01-01", null, group.getId(), null, null, null,
+        "成都工厂历史股权交割证据"), "admin");
+
+    // 武汉工厂 2025-07 年中收购：股权交割日 07-10、出租方停计量日 07-16、设备实际交接日 07-21
+    // 共享租赁设备 EQ-WH-01：月初仍由出租方按租赁约定运营控制
+    ownershipService.registerEvent(new CreateEventReq(
+        "LEASE", wh.getId(), "EQ-WH-01", "LEASE", "LEASE-WH-2025-007",
+        "2025-07-01", "华东设备租赁公司", null, null, null, "OTHER",
+        "共享租赁设备：交接前由出租方运营并计量"), "admin");
+    ownershipService.registerEvent(new CreateEventReq(
+        "ACQUISITION", wh.getId(), null, "LEGAL", "LEGAL-WH-2025-0710",
+        "2025-07-10", "武汉原股东", group.getId(), null, null, null,
+        "股权交割：集团自 7 月 10 日起取得法人控制权"), "admin");
+    ownershipService.registerEvent(new CreateEventReq(
+        "METER_STOP", wh.getId(), "EQ-WH-01", "METERING", "METER-WH-2025-0716",
+        "2025-07-16", "华东设备租赁公司", null, null, null, null,
+        "出租方自 7 月 16 日停止计量，设备尚未交接"), "admin");
+    ownershipService.registerEvent(new CreateEventReq(
+        "HANDOVER", wh.getId(), "EQ-WH-01", "HANDOVER", "HANDOVER-WH-2025-0721",
+        "2025-07-21", "华东设备租赁公司", null, null, null, null,
+        "设备实际交接凭证：7 月 21 日起集团运营控制"), "admin");
 
     // ---------- 因子目录 ----------
     Factor elecEast = factor("ELEC-CNEAST", "华东电网电力排放因子", "GRID_ELEC", "CN-EAST");
@@ -93,17 +140,17 @@ public class SampleDataInitializer implements ApplicationRunner {
 
     // ---------- 2025-05 来源批次（全部已核验，因子齐备） ----------
     verify(batch("B-2025-05-ELEC-SZ", sz, "ELECTRICITY", "2025-05", List.of(
-        row(l1, "GRID_ELEC", "680000", null),
-        row(l2, "GRID_ELEC", "420000", null))));
+        row(l1, "GRID_ELEC", "680000", null, null),
+        row(l2, "GRID_ELEC", "420000", null, null))));
     verify(batch("B-2025-05-FUEL-SZ", sz, "FUEL", "2025-05", List.of(
-        row(l1, "NATURAL_GAS", "28000", null),
-        row(l1, "DIESEL", "4000", null))));
+        row(l1, "NATURAL_GAS", "28000", null, null),
+        row(l1, "DIESEL", "4000", null, null))));
     verify(batch("B-2025-05-ELEC-CD", cd, "ELECTRICITY", "2025-05", List.of(
-        row(l1, "GRID_ELEC", "350000", null),
-        row(l2, "GRID_ELEC", "150000", null))));
+        row(l1, "GRID_ELEC", "350000", null, null),
+        row(l2, "GRID_ELEC", "150000", null, null))));
     verify(batch("B-2025-05-PROC-GP", sz, "PROCUREMENT", "2025-05", List.of(
-        row(sz, l1, "PURCH_STEEL", "480", "V-9001"),
-        row(cd, l1, "PURCH_STEEL", "260", "V-9002"))));
+        row(sz, l1, "PURCH_STEEL", "480", "V-9001", null),
+        row(cd, l1, "PURCH_STEEL", "260", "V-9002", null))));
 
     // ---------- 2025-05 正式运行 → 冻结 → 审批 → 发布 ----------
     CalcRun mayRun = runService.createOfficialRun("2025-05", "analyst");
@@ -117,21 +164,36 @@ public class SampleDataInitializer implements ApplicationRunner {
     // ---------- 2025-06 来源批次（用于验收回放） ----------
     // 苏州电力：含一行未分摊到产品线的厂区公共用电 → 勾稽差异演示
     verify(batch("B-2025-06-ELEC-SZ", sz, "ELECTRICITY", "2025-06", List.of(
-        row(l1, "GRID_ELEC", "700000", null),
-        row(l2, "GRID_ELEC", "500000", null),
-        row(null, "GRID_ELEC", "100000", null))));
+        row(l1, "GRID_ELEC", "700000", null, null),
+        row(l2, "GRID_ELEC", "500000", null, null),
+        row(null, "GRID_ELEC", "100000", null, null))));
     verify(batch("B-2025-06-FUEL-SZ", sz, "FUEL", "2025-06", List.of(
-        row(l1, "NATURAL_GAS", "30000", null),
-        row(l2, "NATURAL_GAS", "18000", null))));
+        row(l1, "NATURAL_GAS", "30000", null, null),
+        row(l2, "NATURAL_GAS", "18000", null, null))));
     verify(batch("B-2025-06-ELEC-CD", cd, "ELECTRICITY", "2025-06", List.of(
-        row(l1, "GRID_ELEC", "400000", null))));
+        row(l1, "GRID_ELEC", "400000", null, null))));
     // 成都天然气：西南天然气因子未批准 → 待核指标演示
     verify(batch("B-2025-06-FUEL-CD", cd, "FUEL", "2025-06", List.of(
-        row(l2, "NATURAL_GAS", "12000", null))));
+        row(l2, "NATURAL_GAS", "12000", null, null))));
     // 集团采购批次：两家工厂共享，用于并发修订冲突演示
     verify(batch("B-2025-06-PROC-GP", sz, "PROCUREMENT", "2025-06", List.of(
-        row(sz, l1, "PURCH_STEEL", "500", "V-1001"),
-        row(cd, l1, "PURCH_STEEL", "300", "V-1002"))));
+        row(sz, l1, "PURCH_STEEL", "500", "V-1001", null),
+        row(cd, l1, "PURCH_STEEL", "300", "V-1002", null))));
+
+    // ---------- 2025-07 武汉工厂（年中收购 + 共享租赁设备，待裁定缺口） ----------
+    // 共享租赁设备用电 310000kWh（按 31 天日均 10000kWh）：1-9 排除 / 10-20 待裁定 / 21-31 纳入
+    verify(batch("B-2025-07-ELEC-WH", wh, "ELECTRICITY", "2025-07", List.of(
+        rowEquip(wh, l1, "GRID_ELEC", "310000", null, "EQ-WH-01"))));
+    // 工厂级柴油（无设备）：仅按法人控制权切分，1-9 排除 / 10-31 纳入
+    verify(batch("B-2025-07-FUEL-WH", wh, "FUEL", "2025-07", List.of(
+        row(wh, l1, "DIESEL", "3100", null, null))));
+
+    // 2025-07 正式运行 + 报告：因含待裁定责任片段，报告保持待核（RECONCILE_FAILED）
+    CalcRun julRun = runService.createOfficialRun("2025-07", "analyst");
+    runService.execute(julRun.getId());
+    Report julReport = disclosureService.createReport("analyst",
+        "2025年7月集团碳排放披露报告", "2025-07", julRun.getId());
+    log.info("2025-07 报告已冻结（待裁定，保持待核）: {}", julReport.getCode());
 
     log.info("样例数据初始化完成");
   }
@@ -162,6 +224,10 @@ public class SampleDataInitializer implements ApplicationRunner {
     return lineRepo.save(l);
   }
 
+  private OwnershipParty party(String code, String name, PartyType type) {
+    return ownershipService.createParty(new CreatePartyReq(code, name, type.name()));
+  }
+
   private Factor factor(String code, String name, String energyType, String region) {
     return factorService.createFactor("admin", new CreateFactorReq(code, name, energyType, region));
   }
@@ -177,14 +243,21 @@ public class SampleDataInitializer implements ApplicationRunner {
         new CreateVersionReq(new BigDecimal(value), from, to));
   }
 
-  private RowInput row(ProductLine line, String energyType, String quantity, String voucher) {
+  private RowInput row(ProductLine line, String energyType, String quantity, String voucher, String equipment) {
     return new RowInput(null, line != null ? line.getId() : null, energyType,
-        new BigDecimal(quantity), voucher);
+        new BigDecimal(quantity), voucher, equipment);
   }
 
-  private RowInput row(Plant plant, ProductLine line, String energyType, String quantity, String voucher) {
+  private RowInput row(Plant plant, ProductLine line, String energyType, String quantity,
+                       String voucher, String equipment) {
     return new RowInput(plant.getId(), line != null ? line.getId() : null, energyType,
-        new BigDecimal(quantity), voucher);
+        new BigDecimal(quantity), voucher, equipment);
+  }
+
+  private RowInput rowEquip(Plant plant, ProductLine line, String energyType, String quantity,
+                            String voucher, String equipment) {
+    return new RowInput(plant.getId(), line != null ? line.getId() : null, energyType,
+        new BigDecimal(quantity), voucher, equipment);
   }
 
   private SourceBatch batch(String batchNo, Plant plant, String category, String period, List<RowInput> rows) {

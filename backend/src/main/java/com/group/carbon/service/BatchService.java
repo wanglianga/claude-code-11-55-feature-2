@@ -154,6 +154,8 @@ public class BatchService {
       row.setQuantity(input.quantity());
       row.setUnit(meta.unit());
       row.setVoucherNo(input.voucherNo());
+      row.setEquipmentCode(input.equipmentCode() == null || input.equipmentCode().isBlank()
+          ? null : input.equipmentCode().trim());
       row.setPeriod(batch.getPeriod());
       row.setStatus(RowStatus.ACTIVE);
       rowRepo.save(row);

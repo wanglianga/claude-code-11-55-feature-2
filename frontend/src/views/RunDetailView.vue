@@ -68,6 +68,32 @@
       </el-table>
     </div>
 
+    <div class="page-card">
+      <h3 class="page-title">活动责任归属明细（责任区间交集切分，截止点 {{ fmtTime(data.run.ownershipCutoff) }}）</h3>
+      <el-table :data="allocations" size="small" border max-height="420">
+        <el-table-column label="工厂" width="100">
+          <template #default="{ row }">{{ store.plantName(row.plantId) }}</template>
+        </el-table-column>
+        <el-table-column label="能源类型" width="100">
+          <template #default="{ row }">{{ store.energyLabel(row.energyType) }}</template>
+        </el-table-column>
+        <el-table-column label="责任片段" width="200">
+          <template #default="{ row }">{{ row.segmentStart }} ~ {{ row.segmentEnd }}（{{ row.daysInSegment }}/{{ row.daysInMonth }} 天）</template>
+        </el-table-column>
+        <el-table-column label="切分活动量" width="140">
+          <template #default="{ row }">{{ fmtNum(row.activityQty) }} {{ row.unit }}</template>
+        </el-table-column>
+        <el-table-column label="参照排放" width="120">
+          <template #default="{ row }">{{ fmtNum(row.emissionTco2e, 2) }}</template>
+        </el-table-column>
+        <el-table-column label="归属" width="110">
+          <template #default="{ row }"><StatusTag kind="allocation" :value="row.classification" /></template>
+        </el-table-column>
+        <el-table-column prop="basis" label="归属依据" min-width="300" show-overflow-tooltip />
+      </el-table>
+      <div class="hint">待裁定/排除片段的排放不并入集团合计；待裁定片段在裁定前不进入任一集团趋势。</div>
+    </div>
+
     <LineageDrawer v-model:visible="lineage.visible" :result-id="lineage.resultId" />
   </div>
 </template>
@@ -82,6 +108,7 @@ import LineageDrawer from '../components/LineageDrawer.vue'
 
 const route = useRoute()
 const data = ref(null)
+const allocations = ref([])
 const lineage = reactive({ visible: false, resultId: null })
 
 const pendingCount = computed(() =>
@@ -100,6 +127,8 @@ onMounted(async () => {
   await store.loadMeta()
   const resp = await api.get(`/runs/${route.params.id}`)
   data.value = resp.data
+  const allocResp = await api.get(`/ownership/runs/${route.params.id}/allocations`)
+  allocations.value = allocResp.data
 })
 </script>
 

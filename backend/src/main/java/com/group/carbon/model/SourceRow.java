@@ -27,6 +27,9 @@ public class SourceRow {
   private String unit;
   @Column(name = "voucher_no")
   private String voucherNo;
+  /** 共享/租赁设备编号；为空表示工厂级活动 */
+  @Column(name = "equipment_code")
+  private String equipmentCode;
   @Column(nullable = false)
   private String period;
   @Enumerated(EnumType.STRING)
@@ -53,6 +56,8 @@ public class SourceRow {
   public void setUnit(String unit) { this.unit = unit; }
   public String getVoucherNo() { return voucherNo; }
   public void setVoucherNo(String voucherNo) { this.voucherNo = voucherNo; }
+  public String getEquipmentCode() { return equipmentCode; }
+  public void setEquipmentCode(String equipmentCode) { this.equipmentCode = equipmentCode; }
   public String getPeriod() { return period; }
   public void setPeriod(String period) { this.period = period; }
   public RowStatus getStatus() { return status; }

@@ -1,5 +1,6 @@
 package com.group.carbon.model;
 
+import com.group.carbon.common.Types.AllocationClass;
 import com.group.carbon.common.Types.ResultStatus;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
@@ -32,6 +33,9 @@ public class EmissionResult {
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
   private ResultStatus status;
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false)
+  private AllocationClass classification = AllocationClass.INCLUDED;
 
   public Long getId() { return id; }
   public void setId(Long id) { this.id = id; }
@@ -57,4 +61,6 @@ public class EmissionResult {
   public void setEmissionTco2e(BigDecimal emissionTco2e) { this.emissionTco2e = emissionTco2e; }
   public ResultStatus getStatus() { return status; }
   public void setStatus(ResultStatus status) { this.status = status; }
+  public AllocationClass getClassification() { return classification; }
+  public void setClassification(AllocationClass classification) { this.classification = classification; }
 }

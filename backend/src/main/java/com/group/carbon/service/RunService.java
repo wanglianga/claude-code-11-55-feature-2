@@ -32,11 +32,13 @@ public class RunService {
   private final FactorRepo factorRepo;
   private final FactorVersionRepo versionRepo;
   private final PlantRepo plantRepo;
+  private final OwnershipService ownershipService;
 
   public RunService(CalcRunRepo runRepo, RunFactorBindingRepo bindingRepo,
                     EmissionResultRepo resultRepo, EmissionLineageRepo lineageRepo,
                     SourceRowRepo rowRepo, SourceBatchRepo batchRepo,
-                    FactorRepo factorRepo, FactorVersionRepo versionRepo, PlantRepo plantRepo) {
+                    FactorRepo factorRepo, FactorVersionRepo versionRepo, PlantRepo plantRepo,
+                    OwnershipService ownershipService) {
     this.runRepo = runRepo;
     this.bindingRepo = bindingRepo;
     this.resultRepo = resultRepo;
@@ -46,6 +48,7 @@ public class RunService {
     this.factorRepo = factorRepo;
     this.versionRepo = versionRepo;
     this.plantRepo = plantRepo;
+    this.ownershipService = ownershipService;
   }
 
   public static void validatePeriod(String period) {
@@ -65,6 +68,8 @@ public class RunService {
     run.setStatus(RunStatus.RUNNING);
     run.setTriggeredBy(username);
     run.setStartedAt(LocalDateTime.now());
+    // 责任状态推导截止点固定为运行创建时刻：运行期间新增事件/裁定不影响本次运行
+    run.setOwnershipCutoff(LocalDateTime.now());
     runRepo.save(run);
     snapshotBindings(run);
     return run;
@@ -81,6 +86,7 @@ public class RunService {
     run.setStatus(RunStatus.RUNNING);
     run.setTriggeredBy(triggeredBy);
     run.setStartedAt(LocalDateTime.now());
+    run.setOwnershipCutoff(LocalDateTime.now());
     runRepo.save(run);
     snapshotBindings(run);
     execute(run.getId());
@@ -115,8 +121,15 @@ public class RunService {
   }
 
   private record GroupKey(Long plantId, Long productLineId, String energyType) {}
+  private record ResultKey(Long plantId, Long productLineId, String energyType, AllocationClass cls) {}
 
-  /** 执行核算：仅使用启动时绑定的因子清单；结果与来源行建立血缘。 */
+  /**
+   * 执行核算：
+   * 1. 按运行截止点复演责任事件流，用责任区间交集把每条活动量切分为纳入/排除/待裁定片段；
+   * 2. 仅“纳入”片段进入合并核算（因子仍取运行启动时绑定的快照）；
+   * 3. 排除/待裁定片段单独成项，排放量不并入集团合计；缺因子只列待核，不用集团平均数兜底；
+   * 4. 结果与来源行、因子版本建立血缘。
+   */
   @Transactional
   public void execute(Long runId) {
     CalcRun run = runRepo.findById(runId).orElseThrow(() -> BizException.notFound("运行不存在"));
@@ -127,16 +140,23 @@ public class RunService {
       Map<Long, Plant> plants = plantRepo.findAll().stream()
           .collect(Collectors.toMap(Plant::getId, p -> p));
 
-      Map<GroupKey, List<SourceRow>> groups = new LinkedHashMap<>();
-      for (SourceRow r : rows) {
-        groups.computeIfAbsent(new GroupKey(r.getPlantId(), r.getProductLineId(), r.getEnergyType()),
-            k -> new ArrayList<>()).add(r);
+      // 1) 责任区间交集切分（事件流按 run.ownershipCutoff 复演）
+      List<ActivityAllocation> allocations = ownershipService.allocateRun(run, rows, bindings, plants);
+      run.setHasPendingOwnership(allocations.stream()
+          .anyMatch(a -> a.getClassification() == AllocationClass.PENDING));
+
+      // 2) 按 工厂×产品线×能源类型×归属分类 聚合片段
+      Map<ResultKey, List<ActivityAllocation>> groups = new LinkedHashMap<>();
+      for (ActivityAllocation a : allocations) {
+        groups.computeIfAbsent(
+            new ResultKey(a.getPlantId(), a.getProductLineId(), a.getEnergyType(), a.getClassification()),
+            k -> new ArrayList<>()).add(a);
       }
 
-      for (Map.Entry<GroupKey, List<SourceRow>> e : groups.entrySet()) {
-        GroupKey key = e.getKey();
+      for (Map.Entry<ResultKey, List<ActivityAllocation>> e : groups.entrySet()) {
+        ResultKey key = e.getKey();
         BigDecimal qty = e.getValue().stream()
-            .map(SourceRow::getQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
+            .map(ActivityAllocation::getActivityQty).reduce(BigDecimal.ZERO, BigDecimal::add);
         Plant plant = plants.get(key.plantId());
         if (plant == null) throw BizException.badRequest("来源行引用了不存在的工厂: " + key.plantId());
 
@@ -153,7 +173,19 @@ public class RunService {
         res.setEnergyType(key.energyType());
         res.setActivityQty(qty);
         res.setUnit(EnergyTypes.unitOf(key.energyType()));
-        if (binding != null) {
+        res.setClassification(key.cls());
+
+        if (key.cls() == AllocationClass.PENDING) {
+          // 控制权与设备交接不一致：待裁定，pro forma 排放不并入任何集团趋势
+          res.setStatus(ResultStatus.PENDING_OWNERSHIP);
+          if (binding != null) {
+            res.setFactorVersionId(binding.getFactorVersionId());
+            res.setFactorValue(binding.getValue());
+          }
+        } else if (key.cls() == AllocationClass.EXCLUDED) {
+          // 非集团运营控制期间：排除出合并报表，不计算集团口径排放
+          res.setStatus(ResultStatus.OK);
+        } else if (binding != null) {
           res.setFactorVersionId(binding.getFactorVersionId());
           res.setFactorValue(binding.getValue());
           res.setEmissionTco2e(qty.multiply(binding.getValue())
@@ -164,8 +196,14 @@ public class RunService {
           res.setStatus(ResultStatus.PENDING_FACTOR);
         }
         resultRepo.save(res);
-        for (SourceRow row : e.getValue()) {
-          lineageRepo.save(new EmissionLineage(res.getId(), row.getId(), row.getQuantity()));
+
+        // 3) 血缘：结果 ← 来源行（按切分后实际占用的活动量）
+        Map<Long, BigDecimal> qtyByRow = new LinkedHashMap<>();
+        for (ActivityAllocation a : e.getValue()) {
+          qtyByRow.merge(a.getSourceRowId(), a.getActivityQty(), BigDecimal::add);
+        }
+        for (Map.Entry<Long, BigDecimal> en : qtyByRow.entrySet()) {
+          lineageRepo.save(new EmissionLineage(res.getId(), en.getKey(), en.getValue()));
         }
       }
       run.setStatus(RunStatus.COMPLETED);
